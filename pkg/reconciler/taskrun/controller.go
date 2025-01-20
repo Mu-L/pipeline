@@ -31,7 +31,7 @@ import (
 	"github.com/tektoncd/pipeline/pkg/pod"
 	cloudeventclient "github.com/tektoncd/pipeline/pkg/reconciler/events/cloudevent"
 	"github.com/tektoncd/pipeline/pkg/reconciler/volumeclaim"
-	resolution "github.com/tektoncd/pipeline/pkg/resolution/resource"
+	resolution "github.com/tektoncd/pipeline/pkg/remoteresolution/resource"
 	"github.com/tektoncd/pipeline/pkg/spire"
 	"github.com/tektoncd/pipeline/pkg/taskrunmetrics"
 	"github.com/tektoncd/pipeline/pkg/tracing"
@@ -40,6 +40,7 @@ import (
 	kubeclient "knative.dev/pkg/client/injection/kube/client"
 	limitrangeinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/limitrange"
 	filteredpodinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/pod/filtered"
+	secretinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/secret"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
@@ -61,10 +62,16 @@ func NewController(opts *pipeline.Options, clock clock.PassiveClock) func(contex
 		limitrangeInformer := limitrangeinformer.Get(ctx)
 		verificationpolicyInformer := verificationpolicyinformer.Get(ctx)
 		resolutionInformer := resolutioninformer.Get(ctx)
+		secretinformer := secretinformer.Get(ctx)
 		spireClient := spire.GetControllerAPIClient(ctx)
-		tracerProvider := tracing.New(TracerProviderName)
+		tracerProvider := tracing.New(TracerProviderName, logger.Named("tracing"))
+		taskrunmetricsRecorder := taskrunmetrics.Get(ctx)
 		//nolint:contextcheck // OnStore methods does not support context as a parameter
-		configStore := config.NewStore(logger.Named("config-store"), taskrunmetrics.MetricsOnStore(logger), spire.OnStore(ctx, logger), tracerProvider.OnStore(logger))
+		configStore := config.NewStore(logger.Named("config-store"),
+			taskrunmetrics.OnStore(logger, taskrunmetricsRecorder),
+			spire.OnStore(ctx, logger),
+			tracerProvider.OnStore(secretinformer.Lister()),
+		)
 		configStore.WatchConfigs(cmw)
 
 		entrypointCache, err := pod.NewEntrypointCache(kubeclientset)
@@ -82,7 +89,7 @@ func NewController(opts *pipeline.Options, clock clock.PassiveClock) func(contex
 			limitrangeLister:         limitrangeInformer.Lister(),
 			verificationPolicyLister: verificationpolicyInformer.Lister(),
 			cloudEventClient:         cloudeventclient.Get(ctx),
-			metrics:                  taskrunmetrics.Get(ctx),
+			metrics:                  taskrunmetricsRecorder,
 			entrypointCache:          entrypointCache,
 			podLister:                podInformer.Lister(),
 			pvcHandler:               volumeclaim.NewPVCHandler(kubeclientset, logger),
@@ -95,6 +102,10 @@ func NewController(opts *pipeline.Options, clock clock.PassiveClock) func(contex
 				ConfigStore: configStore,
 			}
 		})
+
+		if _, err := secretinformer.Informer().AddEventHandler(controller.HandleAll(tracerProvider.Handler)); err != nil {
+			logging.FromContext(ctx).Panicf("Couldn't register Secret informer event handler: %w", err)
+		}
 
 		if _, err := taskRunInformer.Informer().AddEventHandler(controller.HandleAll(impl.Enqueue)); err != nil {
 			logging.FromContext(ctx).Panicf("Couldn't register TaskRun informer event handler: %w", err)

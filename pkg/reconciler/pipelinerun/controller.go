@@ -33,11 +33,12 @@ import (
 	"github.com/tektoncd/pipeline/pkg/pipelinerunmetrics"
 	cloudeventclient "github.com/tektoncd/pipeline/pkg/reconciler/events/cloudevent"
 	"github.com/tektoncd/pipeline/pkg/reconciler/volumeclaim"
-	resolution "github.com/tektoncd/pipeline/pkg/resolution/resource"
+	resolution "github.com/tektoncd/pipeline/pkg/remoteresolution/resource"
 	"github.com/tektoncd/pipeline/pkg/tracing"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/utils/clock"
 	kubeclient "knative.dev/pkg/client/injection/kube/client"
+	secretinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/secret"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
@@ -59,9 +60,14 @@ func NewController(opts *pipeline.Options, clock clock.PassiveClock) func(contex
 		pipelineRunInformer := pipelineruninformer.Get(ctx)
 		resolutionInformer := resolutioninformer.Get(ctx)
 		verificationpolicyInformer := verificationpolicyinformer.Get(ctx)
-		tracerProvider := tracing.New(TracerProviderName)
+		secretinformer := secretinformer.Get(ctx)
+		tracerProvider := tracing.New(TracerProviderName, logger.Named("tracing"))
+		pipelinerunmetricsRecorder := pipelinerunmetrics.Get(ctx)
 		//nolint:contextcheck // OnStore methods does not support context as a parameter
-		configStore := config.NewStore(logger.Named("config-store"), pipelinerunmetrics.MetricsOnStore(logger), tracerProvider.OnStore(logger))
+		configStore := config.NewStore(logger.Named("config-store"),
+			pipelinerunmetrics.OnStore(logger, pipelinerunmetricsRecorder),
+			tracerProvider.OnStore(secretinformer.Lister()),
+		)
 		configStore.WatchConfigs(cmw)
 
 		c := &Reconciler{
@@ -74,7 +80,7 @@ func NewController(opts *pipeline.Options, clock clock.PassiveClock) func(contex
 			customRunLister:          customRunInformer.Lister(),
 			verificationPolicyLister: verificationpolicyInformer.Lister(),
 			cloudEventClient:         cloudeventclient.Get(ctx),
-			metrics:                  pipelinerunmetrics.Get(ctx),
+			metrics:                  pipelinerunmetricsRecorder,
 			pvcHandler:               volumeclaim.NewPVCHandler(kubeclientset, logger),
 			resolutionRequester:      resolution.NewCRDRequester(resolutionclient.Get(ctx), resolutionInformer.Lister()),
 			tracerProvider:           tracerProvider,
@@ -85,6 +91,10 @@ func NewController(opts *pipeline.Options, clock clock.PassiveClock) func(contex
 				ConfigStore: configStore,
 			}
 		})
+
+		if _, err := secretinformer.Informer().AddEventHandler(controller.HandleAll(tracerProvider.Handler)); err != nil {
+			logging.FromContext(ctx).Panicf("Couldn't register Secret informer event handler: %w", err)
+		}
 
 		if _, err := pipelineRunInformer.Informer().AddEventHandler(controller.HandleAll(impl.Enqueue)); err != nil {
 			logging.FromContext(ctx).Panicf("Couldn't register PipelineRun informer event handler: %w", err)

@@ -13,7 +13,18 @@ limitations under the License.
 
 package http
 
+import "github.com/tektoncd/pipeline/pkg/resolution/resource"
+
 const (
-	// urlParam is the url to fetch the task from
-	urlParam string = "url"
+	// UrlParam is the URL to fetch the task from
+	UrlParam string = resource.ParamURL
+
+	// HttpBasicAuthUsername is the user name to use for basic auth
+	HttpBasicAuthUsername string = "http-username"
+
+	// HttpBasicAuthSecret is the reference to a secret in the PipelineRun or TaskRun namespace to use for basic auth
+	HttpBasicAuthSecret string = "http-password-secret"
+
+	// HttpBasicAuthSecretKey is the key in the httpBasicAuthSecret secret to use for basic auth
+	HttpBasicAuthSecretKey string = "http-password-secret-key"
 )

@@ -40,6 +40,7 @@ import (
 	fakeverificationpolicyinformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1alpha1/verificationpolicy/fake"
 	fakeclustertaskinformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1beta1/clustertask/fake"
 	fakecustomruninformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1beta1/customrun/fake"
+	fakestepactioninformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1beta1/stepaction/fake"
 	fakeresolutionclientset "github.com/tektoncd/pipeline/pkg/client/resolution/clientset/versioned/fake"
 	resolutioninformersv1alpha1 "github.com/tektoncd/pipeline/pkg/client/resolution/informers/externalversions/resolution/v1beta1"
 	fakeresolutionrequestclient "github.com/tektoncd/pipeline/pkg/client/resolution/injection/client/fake"
@@ -60,6 +61,7 @@ import (
 	fakeconfigmapinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/configmap/fake"
 	fakelimitrangeinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/limitrange/fake"
 	fakefilteredpodinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/pod/filtered/fake"
+	fakesecretinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/secret/fake"
 	fakeserviceaccountinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/serviceaccount/fake"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/system"
@@ -72,6 +74,7 @@ type Data struct {
 	Pipelines               []*v1.Pipeline
 	TaskRuns                []*v1.TaskRun
 	Tasks                   []*v1.Task
+	StepActions             []*v1beta1.StepAction
 	ClusterTasks            []*v1beta1.ClusterTask
 	CustomRuns              []*v1beta1.CustomRun
 	Pods                    []*corev1.Pod
@@ -82,6 +85,7 @@ type Data struct {
 	ResolutionRequests      []*resolutionv1alpha1.ResolutionRequest
 	ExpectedCloudEventCount int
 	VerificationPolicies    []*v1alpha1.VerificationPolicy
+	Secrets                 []*corev1.Secret
 }
 
 // Clients holds references to clients which are useful for reconciler tests.
@@ -100,6 +104,7 @@ type Informers struct {
 	Run                informersv1alpha1.RunInformer
 	CustomRun          informersv1beta1.CustomRunInformer
 	Task               informersv1.TaskInformer
+	StepAction         informersv1beta1.StepActionInformer
 	ClusterTask        informersv1beta1.ClusterTaskInformer
 	Pod                coreinformers.PodInformer
 	ConfigMap          coreinformers.ConfigMapInformer
@@ -107,6 +112,7 @@ type Informers struct {
 	LimitRange         coreinformers.LimitRangeInformer
 	ResolutionRequest  resolutioninformersv1alpha1.ResolutionRequestInformer
 	VerificationPolicy informersv1alpha1.VerificationPolicyInformer
+	Secret             coreinformers.SecretInformer
 }
 
 // Assets holds references to the controller, logs, clients, and informers.
@@ -185,6 +191,7 @@ func SeedTestData(t *testing.T, ctx context.Context, d Data) (Clients, Informers
 		TaskRun:            faketaskruninformer.Get(ctx),
 		CustomRun:          fakecustomruninformer.Get(ctx),
 		Task:               faketaskinformer.Get(ctx),
+		StepAction:         fakestepactioninformer.Get(ctx),
 		ClusterTask:        fakeclustertaskinformer.Get(ctx),
 		Pod:                fakefilteredpodinformer.Get(ctx, v1.ManagedByLabelKey),
 		ConfigMap:          fakeconfigmapinformer.Get(ctx),
@@ -192,6 +199,7 @@ func SeedTestData(t *testing.T, ctx context.Context, d Data) (Clients, Informers
 		LimitRange:         fakelimitrangeinformer.Get(ctx),
 		ResolutionRequest:  fakeresolutionrequestinformer.Get(ctx),
 		VerificationPolicy: fakeverificationpolicyinformer.Get(ctx),
+		Secret:             fakesecretinformer.Get(ctx),
 	}
 
 	// Attach reactors that add resource mutations to the appropriate
@@ -222,6 +230,13 @@ func SeedTestData(t *testing.T, ctx context.Context, d Data) (Clients, Informers
 	for _, ta := range d.Tasks {
 		ta := ta.DeepCopy() // Avoid assumptions that the informer's copy is modified.
 		if _, err := c.Pipeline.TektonV1().Tasks(ta.Namespace).Create(ctx, ta, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.Pipeline.PrependReactor("*", "stepactions", AddToInformer(t, i.StepAction.Informer().GetIndexer()))
+	for _, sa := range d.StepActions {
+		sa := sa.DeepCopy() // Avoid assumptions that the informer's copy is modified.
+		if _, err := c.Pipeline.TektonV1beta1().StepActions(sa.Namespace).Create(ctx, sa, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -278,6 +293,14 @@ func SeedTestData(t *testing.T, ctx context.Context, d Data) (Clients, Informers
 	for _, vp := range d.VerificationPolicies {
 		vp := vp.DeepCopy() // Avoid assumptions that the informer's copy is modified.
 		if _, err := c.Pipeline.TektonV1alpha1().VerificationPolicies(vp.Namespace).Create(ctx, vp, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	c.Kube.PrependReactor("*", "secrets", AddToInformer(t, i.Secret.Informer().GetIndexer()))
+	for _, s := range d.Secrets {
+		s := s.DeepCopy() // Avoid assumptions that the informer's copy is modified.
+		if _, err := c.Kube.CoreV1().Secrets(s.Namespace).Create(ctx, s, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}

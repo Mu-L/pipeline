@@ -56,6 +56,7 @@ spec:
   params:
   - name: param-1
     type: string
+    enum: ["v1", "v2"]
     description: my first param
   results:
   - name: result-1
@@ -74,6 +75,87 @@ spec:
   - image: foo
   - image: bar
 `
+	stepResultTaskYAML := `
+metadata:
+  name: foo
+  namespace: bar
+  generation: 1
+spec:
+  displayName: "task-display-name"
+  description: test
+  steps:
+  - image: foo
+    results:
+      - name: res
+        type: string
+      - name: arr
+        type: array
+      - name: obj
+        type: object
+        properties:
+          key:
+            type: string
+`
+	stepWhenTaskYAML := `
+metadata:
+  name: foo
+  namespace: bar
+spec:
+  displayName: "task-step-when"
+  description: test
+  steps:
+    - image: foo
+      name: should-execute
+      image: bash:latest
+      when:
+       - input: "$(workspaces.custom.bound)"
+         operator: in
+         values: ["true"]
+`
+	stepActionTaskYAML := `
+metadata:
+  name: foo
+  namespace: bar
+spec:
+  steps:
+    - ref:
+        name: "step-action"
+      params:
+        - name: param1
+          value: hello
+`
+
+	stepActionTaskResultYAML := `
+metadata:
+  name: foo
+  namespace: bar
+spec:
+  results:
+    - name: stepActionResult
+      type: string
+      value: "$(steps.stepName.results.resultName)"
+  steps:
+    - name: stepName
+      ref:
+        name: "step-action"
+`
+	remoteStepActionTaskYAML := `
+metadata:
+  name: foo
+  namespace: bar
+spec:
+  steps:
+    - ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: https://github.com/tektoncd/catalog.git
+          - name: pathInRepo
+            value: /stepaction/sample/sample.yaml
+          - name: revision
+            value: main
+`
+
 	taskWithAllNoDeprecatedFieldsYAML := `
 metadata:
   name: foo
@@ -97,7 +179,7 @@ spec:
     volumeMounts:
     volumeDevices:
     imagePullPolicy: IfNotPresent
-    securityContext: 
+    securityContext:
       privileged: true
     script: "echo 'hello world'"
     timeout: 1h
@@ -122,7 +204,7 @@ spec:
     volumeMounts:
     volumeDevices:
     imagePullPolicy: IfNotPresent
-    securityContext: 
+    securityContext:
       privileged: true
   sidecars:
   - name: sidecar
@@ -139,7 +221,7 @@ spec:
     volumeMounts:
     volumeDevices:
     imagePullPolicy: IfNotPresent
-    securityContext: 
+    securityContext:
       privileged: true
     script: "echo 'hello world'"
     timeout: 1h
@@ -261,6 +343,21 @@ spec:
 	multiStepTaskV1beta1 := parse.MustParseV1beta1Task(t, multiStepTaskYAML)
 	multiStepTaskV1 := parse.MustParseV1Task(t, multiStepTaskYAML)
 
+	stepResultTaskV1beta1 := parse.MustParseV1beta1Task(t, stepResultTaskYAML)
+	stepResultTaskV1 := parse.MustParseV1Task(t, stepResultTaskYAML)
+
+	stepWhenTaskV1beta1 := parse.MustParseV1beta1Task(t, stepWhenTaskYAML)
+	stepWhenTaskV1 := parse.MustParseV1Task(t, stepWhenTaskYAML)
+
+	stepActionTaskV1beta1 := parse.MustParseV1beta1Task(t, stepActionTaskYAML)
+	stepActionTaskV1 := parse.MustParseV1Task(t, stepActionTaskYAML)
+
+	stepActionTaskResultV1beta1 := parse.MustParseV1beta1Task(t, stepActionTaskResultYAML)
+	stepActionTaskResultV1 := parse.MustParseV1Task(t, stepActionTaskResultYAML)
+
+	remoteStepActionTaskV1beta1 := parse.MustParseV1beta1Task(t, remoteStepActionTaskYAML)
+	remoteStepActionTaskV1 := parse.MustParseV1Task(t, remoteStepActionTaskYAML)
+
 	taskWithAllNoDeprecatedFieldsV1beta1 := parse.MustParseV1beta1Task(t, taskWithAllNoDeprecatedFieldsYAML)
 	taskWithAllNoDeprecatedFieldsV1 := parse.MustParseV1Task(t, taskWithAllNoDeprecatedFieldsYAML)
 
@@ -293,6 +390,26 @@ spec:
 		name:        "task conversion all non deprecated fields",
 		v1beta1Task: taskWithAllNoDeprecatedFieldsV1beta1,
 		v1Task:      taskWithAllNoDeprecatedFieldsV1,
+	}, {
+		name:        "step results in task",
+		v1beta1Task: stepResultTaskV1beta1,
+		v1Task:      stepResultTaskV1,
+	}, {
+		name:        "step when in task",
+		v1beta1Task: stepWhenTaskV1beta1,
+		v1Task:      stepWhenTaskV1,
+	}, {
+		name:        "step action in task",
+		v1beta1Task: stepActionTaskV1beta1,
+		v1Task:      stepActionTaskV1,
+	}, {
+		name:        "value in task result",
+		v1beta1Task: stepActionTaskResultV1beta1,
+		v1Task:      stepActionTaskResultV1,
+	}, {
+		name:        "remote step action in task",
+		v1beta1Task: remoteStepActionTaskV1beta1,
+		v1Task:      remoteStepActionTaskV1,
 	}, {
 		name:        "task conversion deprecated fields",
 		v1beta1Task: taskWithDeprecatedFieldsV1beta1,

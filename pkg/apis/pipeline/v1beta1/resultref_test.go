@@ -27,6 +27,7 @@ import (
 )
 
 func TestNewResultReference(t *testing.T) {
+	idx1 := 1
 	for _, tt := range []struct {
 		name  string
 		param v1beta1.Param
@@ -42,7 +43,7 @@ func TestNewResultReference(t *testing.T) {
 			Result:       "sumResult",
 		}},
 	}, {
-		name: "refer whole array result",
+		name: "reference whole array/object result",
 		param: v1beta1.Param{
 			Name:  "param",
 			Value: *v1beta1.NewStructuredValues("$(tasks.sumTask.results.sumResult[*])"),
@@ -50,6 +51,7 @@ func TestNewResultReference(t *testing.T) {
 		want: []*v1beta1.ResultRef{{
 			PipelineTask: "sumTask",
 			Result:       "sumResult",
+			ResultsIndex: nil,
 		}},
 	}, {
 		name: "Test valid expression with single object result property",
@@ -71,7 +73,7 @@ func TestNewResultReference(t *testing.T) {
 		want: []*v1beta1.ResultRef{{
 			PipelineTask: "sumTask",
 			Result:       "sumResult",
-			ResultsIndex: 1,
+			ResultsIndex: &idx1,
 		}},
 	}, {
 		name: "Test valid expression with multiple object result properties",
@@ -540,7 +542,7 @@ func TestHasResultReferenceWhenExpression(t *testing.T) {
 			}
 			got := v1beta1.NewResultRefs(expressions)
 			if d := cmp.Diff(tt.wantRef, got); d != "" {
-				t.Errorf(diff.PrintWantGot(d))
+				t.Error(diff.PrintWantGot(d))
 			}
 		})
 	}
@@ -621,7 +623,7 @@ func TestLooksLikeResultRefWhenExpressionFalse(t *testing.T) {
 	}
 }
 
-// TestPipelineTaskResultReferences tests that PipelineTaskResultRefs()
+// TestPipelineTaskResultRefs tests that PipelineTaskResultRefs()
 // parses all the result variables used in a PipelineTask correctly and
 // returns them all in the expected order.
 func TestPipelineTaskResultRefs(t *testing.T) {
@@ -649,7 +651,8 @@ func TestPipelineTaskResultRefs(t *testing.T) {
 				Value: *v1beta1.NewStructuredValues("$(tasks.pt5.results.r5)", "$(tasks.pt6.results.r6)"),
 			}, {
 				Value: *v1beta1.NewStructuredValues("$(tasks.pt7.results.r7)", "$(tasks.pt8.results.r8)"),
-			}}},
+			}},
+		},
 	}
 	refs := v1beta1.PipelineTaskResultRefs(&pt)
 	expectedRefs := []*v1beta1.ResultRef{{
@@ -694,11 +697,12 @@ func TestParseResultName(t *testing.T) {
 		name  string
 		input string
 		want  []string
-	}{{
-		name:  "array indexing",
-		input: "anArrayResult[1]",
-		want:  []string{"anArrayResult", "1"},
-	},
+	}{
+		{
+			name:  "array indexing",
+			input: "anArrayResult[1]",
+			want:  []string{"anArrayResult", "1"},
+		},
 		{
 			name:  "array star reference",
 			input: "anArrayResult[*]",
@@ -720,37 +724,38 @@ func TestGetVarSubstitutionExpressionsForPipelineResult(t *testing.T) {
 		name   string
 		result v1beta1.PipelineResult
 		want   []string
-	}{{
-		name: "get string result expressions",
-		result: v1beta1.PipelineResult{
-			Name:  "string result",
-			Type:  v1beta1.ResultsTypeString,
-			Value: *v1beta1.NewStructuredValues("$(tasks.task1.results.result1) and $(tasks.task2.results.result2)"),
+	}{
+		{
+			name: "get string result expressions",
+			result: v1beta1.PipelineResult{
+				Name:  "string result",
+				Type:  v1beta1.ResultsTypeString,
+				Value: *v1beta1.NewStructuredValues("$(tasks.task1.results.result1) and $(tasks.task2.results.result2)"),
+			},
+			want: []string{"tasks.task1.results.result1", "tasks.task2.results.result2"},
+		}, {
+			name: "get array result expressions",
+			result: v1beta1.PipelineResult{
+				Name:  "array result",
+				Type:  v1beta1.ResultsTypeString,
+				Value: *v1beta1.NewStructuredValues("$(tasks.task1.results.result1)", "$(tasks.task2.results.result2)"),
+			},
+			want: []string{"tasks.task1.results.result1", "tasks.task2.results.result2"},
+		}, {
+			name: "get object result expressions",
+			result: v1beta1.PipelineResult{
+				Name: "object result",
+				Type: v1beta1.ResultsTypeString,
+				Value: *v1beta1.NewObject(map[string]string{
+					"key1": "$(tasks.task1.results.result1)",
+					"key2": "$(tasks.task2.results.result2) and another one $(tasks.task3.results.result3)",
+					"key3": "no ref here",
+				}),
+			},
+			want: []string{"tasks.task1.results.result1", "tasks.task2.results.result2", "tasks.task3.results.result3"},
 		},
-		want: []string{"tasks.task1.results.result1", "tasks.task2.results.result2"},
-	}, {
-		name: "get array result expressions",
-		result: v1beta1.PipelineResult{
-			Name:  "array result",
-			Type:  v1beta1.ResultsTypeString,
-			Value: *v1beta1.NewStructuredValues("$(tasks.task1.results.result1)", "$(tasks.task2.results.result2)"),
-		},
-		want: []string{"tasks.task1.results.result1", "tasks.task2.results.result2"},
-	}, {
-		name: "get object result expressions",
-		result: v1beta1.PipelineResult{
-			Name: "object result",
-			Type: v1beta1.ResultsTypeString,
-			Value: *v1beta1.NewObject(map[string]string{
-				"key1": "$(tasks.task1.results.result1)",
-				"key2": "$(tasks.task2.results.result2) and another one $(tasks.task3.results.result3)",
-				"key3": "no ref here",
-			}),
-		},
-		want: []string{"tasks.task1.results.result1", "tasks.task2.results.result2", "tasks.task3.results.result3"},
-	},
 	}
-	var sortStrings = func(x, y string) bool {
+	sortStrings := func(x, y string) bool {
 		return x < y
 	}
 	for _, tt := range tests {

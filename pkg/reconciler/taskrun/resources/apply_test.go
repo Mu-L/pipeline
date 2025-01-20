@@ -175,6 +175,44 @@ var (
 		}},
 	}
 
+	stepParamTaskSpec = &v1.TaskSpec{
+		Params: v1.ParamSpecs{{
+			Name: "myObject",
+			Default: &v1.ParamValue{
+				Type:      v1.ParamTypeObject,
+				ObjectVal: map[string]string{"key1": "key1"},
+			},
+		}, {
+			Name: "myString",
+			Default: &v1.ParamValue{
+				Type:      v1.ParamTypeString,
+				StringVal: "string-value",
+			},
+		}, {
+			Name: "myArray",
+			Default: &v1.ParamValue{
+				Type:     v1.ParamTypeArray,
+				ArrayVal: []string{"array", "value"},
+			},
+		}},
+		Steps: []v1.Step{{
+			Name: "foo",
+			Ref: &v1.Ref{
+				Name: "stepAction",
+			},
+			Params: v1.Params{{
+				Name:  "myObject",
+				Value: *v1.NewStructuredValues("$(params.myObject[*])"),
+			}, {
+				Name:  "myString",
+				Value: *v1.NewStructuredValues("$(params.myString)"),
+			}, {
+				Name:  "myArray",
+				Value: *v1.NewStructuredValues("$(params.myArray[*])"),
+			}},
+		}},
+	}
+
 	// a taskspec for testing object var in all places i.e. Sidecars, StepTemplate, Steps and Volumns
 	objectParamTaskSpec = &v1.TaskSpec{
 		Sidecars: []v1.Sidecar{{
@@ -513,12 +551,14 @@ var (
 
 	arrayTaskRun0Elements = &v1.TaskRun{
 		Spec: v1.TaskRunSpec{
-			Params: []v1.Param{{
-				Name: "array-param",
-				Value: v1.ParamValue{
-					Type:     v1.ParamTypeArray,
-					ArrayVal: []string{},
-				}},
+			Params: []v1.Param{
+				{
+					Name: "array-param",
+					Value: v1.ParamValue{
+						Type:     v1.ParamTypeArray,
+						ArrayVal: []string{},
+					},
+				},
 			},
 		},
 	}
@@ -726,7 +766,7 @@ func TestApplyArrayParameters(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resources.ApplyParameters(context.Background(), tt.args.ts, tt.args.tr, tt.args.dp...)
+			got := resources.ApplyParameters(tt.args.ts, tt.args.tr, tt.args.dp...)
 			if d := cmp.Diff(tt.want, got); d != "" {
 				t.Errorf("ApplyParameters() got diff %s", diff.PrintWantGot(d))
 			}
@@ -795,7 +835,7 @@ func TestApplyParameters(t *testing.T) {
 		spec.Sidecars[0].Image = "bar"
 		spec.Sidecars[0].Env[0].Value = "world"
 	})
-	got := resources.ApplyParameters(context.Background(), simpleTaskSpec, tr, dp...)
+	got := resources.ApplyParameters(simpleTaskSpec, tr, dp...)
 	if d := cmp.Diff(want, got); d != "" {
 		t.Errorf("ApplyParameters() got diff %s", diff.PrintWantGot(d))
 	}
@@ -861,7 +901,7 @@ func TestApplyParameters_ArrayIndexing(t *testing.T) {
 		spec.Sidecars[0].Image = "bar"
 		spec.Sidecars[0].Env[0].Value = "world"
 	})
-	got := resources.ApplyParameters(context.Background(), simpleTaskSpecArrayIndexing, tr, dp...)
+	got := resources.ApplyParameters(simpleTaskSpecArrayIndexing, tr, dp...)
 	if d := cmp.Diff(want, got); d != "" {
 		t.Errorf("ApplyParameters() got diff %s", diff.PrintWantGot(d))
 	}
@@ -927,7 +967,79 @@ func TestApplyObjectParameters(t *testing.T) {
 		spec.Volumes[3].VolumeSource.CSI.VolumeAttributes["secretProviderClass"] = "taskrun-value-for-key1"
 		spec.Volumes[3].VolumeSource.CSI.NodePublishSecretRef.Name = "taskrun-value-for-key1"
 	})
-	got := resources.ApplyParameters(context.Background(), objectParamTaskSpec, tr, dp...)
+	got := resources.ApplyParameters(objectParamTaskSpec, tr, dp...)
+	if d := cmp.Diff(want, got); d != "" {
+		t.Errorf("ApplyParameters() got diff %s", diff.PrintWantGot(d))
+	}
+}
+
+func TestApplyStepParameters(t *testing.T) {
+	// define the taskrun to test values provided by taskrun can overwrite the values provided in spec's default
+	tr := &v1.TaskRun{
+		Spec: v1.TaskRunSpec{
+			Params: []v1.Param{{
+				Name: "myObject",
+				Value: *v1.NewObject(map[string]string{
+					"key1": "taskrun-value-for-key1",
+				}),
+			}, {
+				Name: "myString",
+				Value: v1.ParamValue{
+					Type:      v1.ParamTypeString,
+					StringVal: "taskrun-string-value",
+				},
+			}, {
+				Name: "myArray",
+				Value: v1.ParamValue{
+					Type:     v1.ParamTypeArray,
+					ArrayVal: []string{"taskrun", "array", "value"},
+				},
+			}},
+			TaskSpec: stepParamTaskSpec,
+		},
+	}
+	dp := []v1.ParamSpec{{
+		Name: "myObject",
+		Default: &v1.ParamValue{
+			Type:      v1.ParamTypeObject,
+			ObjectVal: map[string]string{"key1": "key1"},
+		},
+	}, {
+		Name: "myString",
+		Default: &v1.ParamValue{
+			Type:      v1.ParamTypeString,
+			StringVal: "default-string-value",
+		},
+	}, {
+		Name: "myArray",
+		Default: &v1.ParamValue{
+			Type:     v1.ParamTypeArray,
+			ArrayVal: []string{"default", "array", "value"},
+		},
+	}}
+
+	want := applyMutation(stepParamTaskSpec, func(spec *v1.TaskSpec) {
+		spec.Steps[0].Params = []v1.Param{{
+			Name: "myObject",
+			Value: v1.ParamValue{
+				Type:      v1.ParamTypeObject,
+				ObjectVal: map[string]string{"key1": "taskrun-value-for-key1"},
+			},
+		}, {
+			Name: "myString",
+			Value: v1.ParamValue{
+				Type:      v1.ParamTypeString,
+				StringVal: "taskrun-string-value",
+			},
+		}, {
+			Name: "myArray",
+			Value: v1.ParamValue{
+				Type:     v1.ParamTypeArray,
+				ArrayVal: []string{"taskrun", "array", "value"},
+			},
+		}}
+	})
+	got := resources.ApplyParameters(stepParamTaskSpec, tr, dp...)
 	if d := cmp.Diff(want, got); d != "" {
 		t.Errorf("ApplyParameters() got diff %s", diff.PrintWantGot(d))
 	}
@@ -991,13 +1103,15 @@ func TestApplyWorkspaces(t *testing.T) {
 						Name: "$(workspaces.myws.volume)",
 					},
 				},
-			}}, {
+			},
+		}, {
 			Name: "some-secret",
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName: "$(workspaces.myws.volume)",
 				},
-			}}, {
+			},
+		}, {
 			Name: "some-pvc",
 			VolumeSource: corev1.VolumeSource{
 				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
@@ -1031,29 +1145,29 @@ func TestApplyWorkspaces(t *testing.T) {
 			EmptyDir: &corev1.EmptyDirVolumeSource{},
 		}},
 		want: applyMutation(ts, func(spec *v1.TaskSpec) {
-			spec.StepTemplate.Env[0].Value = "ws-9l9zj"
+			spec.StepTemplate.Env[0].Value = "ws-b31db"
 			spec.StepTemplate.Env[1].Value = "foo"
 			spec.StepTemplate.Env[2].Value = ""
 
-			spec.Steps[0].Name = "ws-9l9zj"
-			spec.Steps[0].Image = "ws-mz4c7"
-			spec.Steps[0].WorkingDir = "ws-mz4c7"
+			spec.Steps[0].Name = "ws-b31db"
+			spec.Steps[0].Image = "ws-a6f34"
+			spec.Steps[0].WorkingDir = "ws-a6f34"
 			spec.Steps[0].Args = []string{"/workspace/myws"}
 
-			spec.Steps[1].VolumeMounts[0].Name = "ws-9l9zj"
+			spec.Steps[1].VolumeMounts[0].Name = "ws-b31db"
 			spec.Steps[1].VolumeMounts[0].MountPath = "path/to//foo"
-			spec.Steps[1].VolumeMounts[0].SubPath = "ws-9l9zj"
+			spec.Steps[1].VolumeMounts[0].SubPath = "ws-b31db"
 
-			spec.Steps[2].Env[0].Value = "ws-9l9zj"
-			spec.Steps[2].Env[1].ValueFrom.SecretKeyRef.LocalObjectReference.Name = "ws-9l9zj"
-			spec.Steps[2].Env[1].ValueFrom.SecretKeyRef.Key = "ws-9l9zj"
-			spec.Steps[2].EnvFrom[0].Prefix = "ws-9l9zj"
-			spec.Steps[2].EnvFrom[0].ConfigMapRef.LocalObjectReference.Name = "ws-9l9zj"
+			spec.Steps[2].Env[0].Value = "ws-b31db"
+			spec.Steps[2].Env[1].ValueFrom.SecretKeyRef.LocalObjectReference.Name = "ws-b31db"
+			spec.Steps[2].Env[1].ValueFrom.SecretKeyRef.Key = "ws-b31db"
+			spec.Steps[2].EnvFrom[0].Prefix = "ws-b31db"
+			spec.Steps[2].EnvFrom[0].ConfigMapRef.LocalObjectReference.Name = "ws-b31db"
 
-			spec.Volumes[0].Name = "ws-9l9zj"
-			spec.Volumes[0].VolumeSource.ConfigMap.LocalObjectReference.Name = "ws-9l9zj"
-			spec.Volumes[1].VolumeSource.Secret.SecretName = "ws-9l9zj"
-			spec.Volumes[2].VolumeSource.PersistentVolumeClaim.ClaimName = "ws-9l9zj"
+			spec.Volumes[0].Name = "ws-b31db"
+			spec.Volumes[0].VolumeSource.ConfigMap.LocalObjectReference.Name = "ws-b31db"
+			spec.Volumes[1].VolumeSource.Secret.SecretName = "ws-b31db"
+			spec.Volumes[2].VolumeSource.PersistentVolumeClaim.ClaimName = "ws-b31db"
 		}),
 	}, {
 		name: "optional-workspace-provided-variable-replacement",
@@ -1369,7 +1483,7 @@ func TestContext(t *testing.T) {
 		t.Run(tc.description, func(t *testing.T) {
 			got := resources.ApplyContexts(&tc.spec, tc.taskName, &tc.tr)
 			if d := cmp.Diff(&tc.want, got); d != "" {
-				t.Errorf(diff.PrintWantGot(d))
+				t.Error(diff.PrintWantGot(d))
 			}
 		})
 	}
@@ -1378,12 +1492,14 @@ func TestContext(t *testing.T) {
 func TestTaskResults(t *testing.T) {
 	names.TestingSeed()
 	ts := &v1.TaskSpec{
-		Results: []v1.TaskResult{{
-			Name:        "current.date.unix.timestamp",
-			Description: "The current date in unix timestamp format",
-		}, {
-			Name:        "current-date-human-readable",
-			Description: "The current date in humand readable format"},
+		Results: []v1.TaskResult{
+			{
+				Name:        "current.date.unix.timestamp",
+				Description: "The current date in unix timestamp format",
+			}, {
+				Name:        "current-date-human-readable",
+				Description: "The current date in humand readable format",
+			},
 		},
 		Steps: []v1.Step{{
 			Name:   "print-date-unix-timestamp",
@@ -1406,7 +1522,51 @@ func TestTaskResults(t *testing.T) {
 		spec.Steps[1].Script = "#!/usr/bin/env bash\ndate | tee /tekton/results/current-date-human-readable"
 		spec.Steps[2].Script = "#!/usr/bin/env bash\ndate | tee /tekton/results/current-date-human-readable"
 	})
-	got := resources.ApplyTaskResults(ts)
+	got := resources.ApplyResults(ts)
+	if d := cmp.Diff(want, got); d != "" {
+		t.Errorf("ApplyTaskResults() got diff %s", diff.PrintWantGot(d))
+	}
+}
+
+func TestStepResults(t *testing.T) {
+	names.TestingSeed()
+	ts := &v1.TaskSpec{
+		Steps: []v1.Step{{
+			Name: "print-date-unix-timestamp",
+			Results: []v1.StepResult{{
+				Name:        "current.date.unix.timestamp",
+				Description: "The current date in unix timestamp format",
+			}},
+			Image: "bash:latest",
+			Args: []string{
+				"$(step.results[\"current.date.unix.timestamp\"].path)",
+			},
+			Script: "#!/usr/bin/env bash\ndate +%s | tee $(step.results[\"current.date.unix.timestamp\"].path)",
+		}, {
+			Name: "print-date-human-readable",
+			Results: []v1.StepResult{{
+				Name:        "current-date-human-readable",
+				Description: "The current date in humand readable format",
+			}},
+			Image:  "bash:latest",
+			Script: "#!/usr/bin/env bash\ndate | tee $(step.results.current-date-human-readable.path)",
+		}, {
+			Name:  "print-date-human-readable-again",
+			Image: "bash:latest",
+			Results: []v1.StepResult{{
+				Name:        "current-date-human-readable",
+				Description: "The current date in humand readable format",
+			}},
+			Script: "#!/usr/bin/env bash\ndate | tee $(step.results['current-date-human-readable'].path)",
+		}},
+	}
+	want := applyMutation(ts, func(spec *v1.TaskSpec) {
+		spec.Steps[0].Script = "#!/usr/bin/env bash\ndate +%s | tee /tekton/steps/step-print-date-unix-timestamp/results/current.date.unix.timestamp"
+		spec.Steps[0].Args[0] = "/tekton/steps/step-print-date-unix-timestamp/results/current.date.unix.timestamp"
+		spec.Steps[1].Script = "#!/usr/bin/env bash\ndate | tee /tekton/steps/step-print-date-human-readable/results/current-date-human-readable"
+		spec.Steps[2].Script = "#!/usr/bin/env bash\ndate | tee /tekton/steps/step-print-date-human-readable-again/results/current-date-human-readable"
+	})
+	got := resources.ApplyResults(ts)
 	if d := cmp.Diff(want, got); d != "" {
 		t.Errorf("ApplyTaskResults() got diff %s", diff.PrintWantGot(d))
 	}
@@ -1476,8 +1636,416 @@ func TestApplyCredentialsPath(t *testing.T) {
 		t.Run(tc.description, func(t *testing.T) {
 			got := resources.ApplyCredentialsPath(&tc.spec, tc.path)
 			if d := cmp.Diff(&tc.want, got); d != "" {
-				t.Errorf(diff.PrintWantGot(d))
+				t.Error(diff.PrintWantGot(d))
 			}
 		})
+	}
+}
+
+func TestApplyParametersToWorkspaceBindings(t *testing.T) {
+	tests := []struct {
+		name string
+		ts   *v1.TaskSpec
+		tr   *v1.TaskRun
+		want *v1.TaskRun
+	}{
+		{
+			name: "pvc",
+			ts: &v1.TaskSpec{
+				Params: []v1.ParamSpec{
+					{Name: "claim-name", Type: v1.ParamTypeString},
+				},
+			},
+			tr: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+								ClaimName: "$(params.claim-name)",
+							},
+						},
+					},
+					Params: v1.Params{{Name: "claim-name", Value: v1.ParamValue{
+						Type:      v1.ParamTypeString,
+						StringVal: "claim-value",
+					}}},
+				},
+			},
+			want: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+								ClaimName: "claim-value",
+							},
+						},
+					},
+					Params: v1.Params{{Name: "claim-name", Value: v1.ParamValue{
+						Type:      v1.ParamTypeString,
+						StringVal: "claim-value",
+					}}},
+				},
+			},
+		},
+		{
+			name: "subPath",
+			ts: &v1.TaskSpec{
+				Params: []v1.ParamSpec{
+					{Name: "subPath-name", Type: v1.ParamTypeString},
+				},
+			},
+			tr: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							SubPath: "$(params.subPath-name)",
+						},
+					},
+					Params: v1.Params{{Name: "subPath-name", Value: v1.ParamValue{
+						Type:      v1.ParamTypeString,
+						StringVal: "subPath-value",
+					}}},
+				},
+			},
+			want: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							SubPath: "subPath-value",
+						},
+					},
+					Params: v1.Params{{Name: "subPath-name", Value: v1.ParamValue{
+						Type:      v1.ParamTypeString,
+						StringVal: "subPath-value",
+					}}},
+				},
+			},
+		},
+		{
+			name: "configMap",
+			ts: &v1.TaskSpec{
+				Params: []v1.ParamSpec{
+					{Name: "configMap-name", Type: v1.ParamTypeString},
+				},
+			},
+			tr: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							ConfigMap: &corev1.ConfigMapVolumeSource{
+								LocalObjectReference: corev1.LocalObjectReference{
+									Name: "$(params.configMap-name)",
+								},
+							},
+						},
+					},
+					Params: v1.Params{{Name: "configMap-name", Value: v1.ParamValue{
+						Type:      v1.ParamTypeString,
+						StringVal: "configMap-value",
+					}}},
+				},
+			},
+			want: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							ConfigMap: &corev1.ConfigMapVolumeSource{
+								LocalObjectReference: corev1.LocalObjectReference{
+									Name: "configMap-value",
+								},
+							},
+						},
+					},
+					Params: v1.Params{{Name: "configMap-name", Value: v1.ParamValue{
+						Type:      v1.ParamTypeString,
+						StringVal: "configMap-value",
+					}}},
+				},
+			},
+		},
+		{
+			name: "secret",
+			ts: &v1.TaskSpec{
+				Params: []v1.ParamSpec{
+					{Name: "secret-name", Type: v1.ParamTypeString},
+				},
+			},
+			tr: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							Secret: &corev1.SecretVolumeSource{
+								SecretName: "$(params.secret-name)",
+							},
+						},
+					},
+					Params: v1.Params{{Name: "secret-name", Value: v1.ParamValue{
+						Type:      v1.ParamTypeString,
+						StringVal: "secret-value",
+					}}},
+				},
+			},
+			want: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							Secret: &corev1.SecretVolumeSource{
+								SecretName: "secret-value",
+							},
+						},
+					},
+					Params: v1.Params{
+						{Name: "secret-name", Value: v1.ParamValue{
+							Type:      v1.ParamTypeString,
+							StringVal: "secret-value",
+						}},
+					},
+				},
+			},
+		},
+		{
+			name: "projected-sources-configMap",
+			ts: &v1.TaskSpec{
+				Params: []v1.ParamSpec{
+					{Name: "proj-configMap-name", Type: v1.ParamTypeString},
+				},
+			},
+			tr: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							Projected: &corev1.ProjectedVolumeSource{
+								Sources: []corev1.VolumeProjection{
+									{
+										ConfigMap: &corev1.ConfigMapProjection{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: "$(params.proj-configMap-name)",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					Params: v1.Params{
+						{
+							Name: "proj-configMap-name", Value: v1.ParamValue{
+								Type:      v1.ParamTypeString,
+								StringVal: "proj-configMap-value",
+							},
+						},
+					},
+				},
+			},
+			want: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							Projected: &corev1.ProjectedVolumeSource{
+								Sources: []corev1.VolumeProjection{
+									{
+										ConfigMap: &corev1.ConfigMapProjection{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: "proj-configMap-value",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					Params: v1.Params{
+						{
+							Name: "proj-configMap-name", Value: v1.ParamValue{
+								Type:      v1.ParamTypeString,
+								StringVal: "proj-configMap-value",
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "projected-sources-secret",
+			ts: &v1.TaskSpec{
+				Params: []v1.ParamSpec{
+					{Name: "proj-secret-name", Type: v1.ParamTypeString},
+				},
+			},
+			tr: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							Projected: &corev1.ProjectedVolumeSource{
+								Sources: []corev1.VolumeProjection{
+									{
+										Secret: &corev1.SecretProjection{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: "$(params.proj-secret-name)",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					Params: v1.Params{
+						{
+							Name: "proj-secret-name", Value: v1.ParamValue{
+								Type:      v1.ParamTypeString,
+								StringVal: "proj-secret-value",
+							},
+						},
+					},
+				},
+			},
+			want: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							Projected: &corev1.ProjectedVolumeSource{
+								Sources: []corev1.VolumeProjection{
+									{
+										Secret: &corev1.SecretProjection{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: "proj-secret-value",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					Params: v1.Params{
+						{
+							Name: "proj-secret-name", Value: v1.ParamValue{
+								Type:      v1.ParamTypeString,
+								StringVal: "proj-secret-value",
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "csi-driver",
+			ts: &v1.TaskSpec{
+				Params: []v1.ParamSpec{
+					{Name: "csi-driver-name", Type: v1.ParamTypeString},
+				},
+			},
+			tr: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							CSI: &corev1.CSIVolumeSource{Driver: "$(params.csi-driver-name)"},
+						},
+					},
+					Params: v1.Params{
+						{
+							Name: "csi-driver-name", Value: v1.ParamValue{
+								Type:      v1.ParamTypeString,
+								StringVal: "csi-driver-value",
+							},
+						},
+					},
+				},
+			},
+			want: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							CSI: &corev1.CSIVolumeSource{Driver: "csi-driver-value"},
+						},
+					},
+					Params: v1.Params{
+						{
+							Name: "csi-driver-name", Value: v1.ParamValue{
+								Type:      v1.ParamTypeString,
+								StringVal: "csi-driver-value",
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "csi-nodePublishSecretRef-name",
+			ts: &v1.TaskSpec{
+				Params: []v1.ParamSpec{
+					{Name: "csi-nodePublishSecretRef-name", Type: v1.ParamTypeString},
+				},
+			},
+			tr: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							CSI: &corev1.CSIVolumeSource{NodePublishSecretRef: &corev1.LocalObjectReference{
+								Name: "$(params.csi-nodePublishSecretRef-name)",
+							}},
+						},
+					},
+					Params: v1.Params{
+						{
+							Name: "csi-nodePublishSecretRef-name", Value: v1.ParamValue{
+								Type:      v1.ParamTypeString,
+								StringVal: "csi-nodePublishSecretRef-value",
+							},
+						},
+					},
+				},
+			},
+			want: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Workspaces: []v1.WorkspaceBinding{
+						{
+							CSI: &corev1.CSIVolumeSource{NodePublishSecretRef: &corev1.LocalObjectReference{
+								Name: "csi-nodePublishSecretRef-value",
+							}},
+						},
+					},
+					Params: v1.Params{
+						{
+							Name: "csi-nodePublishSecretRef-name", Value: v1.ParamValue{
+								Type:      v1.ParamTypeString,
+								StringVal: "csi-nodePublishSecretRef-value",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resources.ApplyParametersToWorkspaceBindings(tt.ts, tt.tr)
+			if d := cmp.Diff(got, tt.want); d != "" {
+				t.Errorf("ApplyParametersToWorkspaceBindings() %v, diff %v", tt.name, d)
+			}
+		})
+	}
+}
+
+func TestArtifacts(t *testing.T) {
+	ts := &v1.TaskSpec{
+		Steps: []v1.Step{
+			{
+				Name:  "name1",
+				Image: "bash:latest",
+				Args: []string{
+					"$(step.artifacts.path)",
+				},
+				Script: "#!/usr/bin/env bash\n echo -n $(step.artifacts.path)",
+			},
+		},
+	}
+
+	want := applyMutation(ts, func(spec *v1.TaskSpec) {
+		spec.Steps[0].Args[0] = "/tekton/steps/step-name1/artifacts/provenance.json"
+		spec.Steps[0].Script = "#!/usr/bin/env bash\n echo -n /tekton/steps/step-name1/artifacts/provenance.json"
+	})
+	got := resources.ApplyArtifacts(ts)
+	if d := cmp.Diff(want, got); d != "" {
+		t.Errorf("ApplyArtifacts() got diff %s", diff.PrintWantGot(d))
 	}
 }

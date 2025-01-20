@@ -189,6 +189,49 @@ func TestValidateNoReferencesToUnknownVariables(t *testing.T) {
 	}
 }
 
+func TestValidateNoReferencesToUnknownVariablesWithDetail(t *testing.T) {
+	type args struct {
+		input  string
+		prefix string
+		vars   sets.String
+	}
+	for _, tc := range []struct {
+		name          string
+		args          args
+		expectedError *apis.FieldError
+	}{{
+		name: "undefined variable",
+		args: args{
+			input:  "--flag=$(inputs.params.baz)",
+			prefix: "inputs.params",
+			vars:   sets.NewString("foo"),
+		},
+		expectedError: &apis.FieldError{
+			Message: `non-existent variable ` + "`baz`" + ` in "--flag=$(inputs.params.baz)"`,
+			Paths:   []string{""},
+		},
+	}, {
+		name: "undefined individual attributes of an object param",
+		args: args{
+			input:  "--flag=$(params.objectParam.key3)",
+			prefix: "params.objectParam",
+			vars:   sets.NewString("key1", "key2"),
+		},
+		expectedError: &apis.FieldError{
+			Message: `non-existent variable ` + "`key3`" + ` in "--flag=$(params.objectParam.key3)"`,
+			Paths:   []string{""},
+		},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := substitution.ValidateNoReferencesToUnknownVariablesWithDetail(tc.args.input, tc.args.prefix, tc.args.vars)
+
+			if d := cmp.Diff(tc.expectedError, got, cmp.AllowUnexported(apis.FieldError{})); d != "" {
+				t.Errorf("ValidateVariableP() error did not match expected error %s", diff.PrintWantGot(d))
+			}
+		})
+	}
+}
+
 func TestValidateNoReferencesToProhibitedVariables(t *testing.T) {
 	type args struct {
 		input  string
@@ -542,7 +585,7 @@ func TestApplyArrayReplacements(t *testing.T) {
 	}
 }
 
-func TestExtractParamsExpressions(t *testing.T) {
+func TestExtractArrayParamsExpressionsExpressions(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
@@ -567,7 +610,45 @@ func TestExtractParamsExpressions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := substitution.ExtractParamsExpressions(tt.input)
+			got := substitution.ExtractArrayIndexingParamsExpressions(tt.input)
+			if d := cmp.Diff(tt.want, got); d != "" {
+				t.Error(diff.PrintWantGot(d))
+			}
+		})
+	}
+}
+
+func TestExtractVariableExpressions(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		prefix string
+		want   []string
+	}{{
+		name:   "normal string",
+		input:  "hello world",
+		prefix: "params",
+		want:   []string{},
+	}, {
+		name:   "param reference",
+		input:  "$(params.paramName)",
+		prefix: "params",
+		want:   []string{"$(params.paramName)"},
+	}, {
+		name:   "param star reference",
+		input:  "$(params.paramName[*])",
+		prefix: "params",
+		want:   []string{"$(params.paramName[*])"},
+	}, {
+		name:   "param index reference",
+		input:  "$(params.paramName[1])",
+		prefix: "params",
+		want:   []string{"$(params.paramName[1])"},
+	},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := substitution.ExtractVariableExpressions(tt.input, tt.prefix)
 			if d := cmp.Diff(tt.want, got); d != "" {
 				t.Error(diff.PrintWantGot(d))
 			}

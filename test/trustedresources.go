@@ -26,7 +26,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -50,29 +50,7 @@ const (
 	signatureAnnotation = "tekton.dev/signature"
 )
 
-var (
-	read = readPasswordFn
-)
-
-// GetUnsignedTask returns unsigned task with given name
-func GetUnsignedTask(name string) *v1beta1.Task {
-	return &v1beta1.Task{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: "tekton.dev/v1beta1",
-			Kind:       "Task"},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        name,
-			Namespace:   namespace,
-			Annotations: map[string]string{"foo": "bar"},
-		},
-		Spec: v1beta1.TaskSpec{
-			Steps: []v1beta1.Step{{
-				Image: "ubuntu",
-				Name:  "echo",
-			}},
-		},
-	}
-}
+var read = readPasswordFn
 
 // SetupTrustedResourceConfig configures the trusted-resources-verification-no-match-policy feature flag with the given mode for testing
 func SetupTrustedResourceConfig(ctx context.Context, verificationNoMatchPolicy string) context.Context {
@@ -115,7 +93,9 @@ func SetupVerificationPolicies(t *testing.T) (signature.SignerVerifier, *ecdsa.P
 		Data: map[string][]byte{"cosign.pub": pub},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "verification-secrets",
-			Namespace: namespace}}
+			Namespace: namespace,
+		},
+	}
 
 	keyInDataVp := getVerificationPolicy(
 		"keyInDataVp",
@@ -136,8 +116,10 @@ func SetupVerificationPolicies(t *testing.T) (signature.SignerVerifier, *ecdsa.P
 	keyInSecretVp := getVerificationPolicy(
 		"keyInSecretVp",
 		namespace,
-		[]v1alpha1.ResourcePattern{{
-			Pattern: "gcr.io/tekton-releases/catalog/upstream/git-clone"},
+		[]v1alpha1.ResourcePattern{
+			{
+				Pattern: "gcr.io/tekton-releases/catalog/upstream/git-clone",
+			},
 		},
 		[]v1alpha1.Authority{
 			{
@@ -171,8 +153,10 @@ func SetupVerificationPolicies(t *testing.T) (signature.SignerVerifier, *ecdsa.P
 	warnModeVP := getVerificationPolicy(
 		"warnModeVP",
 		namespace,
-		[]v1alpha1.ResourcePattern{{
-			Pattern: "warnVP"},
+		[]v1alpha1.ResourcePattern{
+			{
+				Pattern: "warnVP",
+			},
 		},
 		[]v1alpha1.Authority{
 			{
@@ -207,7 +191,9 @@ func SetupMatchAllVerificationPolicies(t *testing.T, namespace string) (signatur
 		Data: map[string][]byte{"cosign.pub": pub},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "verification-secrets",
-			Namespace: namespace}}
+			Namespace: namespace,
+		},
+	}
 
 	matchAllVp := getVerificationPolicy(
 		"matchAllVp",
@@ -239,7 +225,7 @@ func GetSignerFromFile(ctx context.Context, t *testing.T) (signature.Signer, str
 	}
 	tmpDir := t.TempDir()
 	pubKey := filepath.Join(tmpDir, "ecdsa.pub")
-	if err := os.WriteFile(pubKey, pub, 0600); err != nil {
+	if err := os.WriteFile(pubKey, pub, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -255,7 +241,7 @@ func GetKeysFromFile(ctx context.Context, t *testing.T) (*ecdsa.PrivateKey, stri
 	}
 	tmpDir := t.TempDir()
 	pubKey := filepath.Join(tmpDir, "ecdsa.pub")
-	if err := os.WriteFile(pubKey, pub, 0600); err != nil {
+	if err := os.WriteFile(pubKey, pub, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -286,7 +272,7 @@ func GenerateKeys(c elliptic.Curve, hashFunc crypto.Hash) (signature.SignerVerif
 // signInterface returns the encoded signature for the given object.
 func signInterface(signer signature.Signer, i interface{}) ([]byte, error) {
 	if signer == nil {
-		return nil, fmt.Errorf("signer is nil")
+		return nil, errors.New("signer is nil")
 	}
 	b, err := json.Marshal(i)
 	if err != nil {
@@ -367,6 +353,7 @@ func getPass(confirm bool) ([]byte, error) {
 	read := read(confirm)
 	return read()
 }
+
 func readPasswordFn(confirm bool) func() ([]byte, error) {
 	pw, ok := os.LookupEnv("PRIVATE_PASSWORD")
 	if ok {
@@ -375,7 +362,7 @@ func readPasswordFn(confirm bool) func() ([]byte, error) {
 		}
 	}
 	return func() ([]byte, error) {
-		return nil, fmt.Errorf("fail to get password")
+		return nil, errors.New("fail to get password")
 	}
 }
 

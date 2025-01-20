@@ -28,6 +28,7 @@ import (
 	v1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/test/diff"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"knative.dev/pkg/apis"
 )
 
 func TestParamSpec_SetDefaults(t *testing.T) {
@@ -451,7 +452,7 @@ func TestArrayReference(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		if d := cmp.Diff(tt.expectedResult, v1.ArrayReference(tt.p)); d != "" {
-			t.Errorf(diff.PrintWantGot(d))
+			t.Error(diff.PrintWantGot(d))
 		}
 	}
 }
@@ -470,7 +471,8 @@ func TestExtractNames(t *testing.T) {
 		params: v1.Params{{
 			Name: "IMAGE", Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "image-1"},
 		}, {
-			Name: "DOCKERFILE", Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "path/to/Dockerfile1"}}},
+			Name: "DOCKERFILE", Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "path/to/Dockerfile1"},
+		}},
 		want: sets.NewString("IMAGE", "DOCKERFILE"),
 	}, {
 		name: "extract param names from ParamTypeArray",
@@ -497,7 +499,7 @@ func TestExtractNames(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		if d := cmp.Diff(tt.want, v1.Params.ExtractNames(tt.params)); d != "" {
-			t.Errorf(diff.PrintWantGot(d))
+			t.Error(diff.PrintWantGot(d))
 		}
 	}
 }
@@ -560,7 +562,7 @@ func TestParams_ReplaceVariables(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.ps.ReplaceVariables(tt.stringReplacements, tt.arrayReplacements, tt.objectReplacements)
 			if d := cmp.Diff(tt.want, got); d != "" {
-				t.Errorf(diff.PrintWantGot(d))
+				t.Error(diff.PrintWantGot(d))
 			}
 		})
 	}
@@ -680,10 +682,129 @@ func TestParseTaskandResultName(t *testing.T) {
 			pipelineTaskName, resultName := tc.param.ParseTaskandResultName()
 
 			if d := cmp.Diff(tc.pipelineTaskName, pipelineTaskName); d != "" {
-				t.Errorf(diff.PrintWantGot(d))
+				t.Error(diff.PrintWantGot(d))
 			}
 			if d := cmp.Diff(tc.resultName, resultName); d != "" {
-				t.Errorf(diff.PrintWantGot(d))
+				t.Error(diff.PrintWantGot(d))
+			}
+		})
+	}
+}
+
+func TestGetNames(t *testing.T) {
+	tcs := []struct {
+		name   string
+		params v1.ParamSpecs
+		want   []string
+	}{{
+		name: "names from param spec",
+		params: v1.ParamSpecs{{
+			Name: "foo",
+		}, {
+			Name: "bar",
+		}},
+		want: []string{"foo", "bar"},
+	}}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.params.GetNames()
+			if d := cmp.Diff(tc.want, got); d != "" {
+				t.Error(diff.PrintWantGot(d))
+			}
+		})
+	}
+}
+
+func TestSortByType(t *testing.T) {
+	tcs := []struct {
+		name   string
+		params v1.ParamSpecs
+		want   []v1.ParamSpecs
+	}{{
+		name: "sort by type",
+		params: v1.ParamSpecs{{
+			Name: "array1",
+			Type: "array",
+		}, {
+			Name: "string1",
+			Type: "string",
+		}, {
+			Name: "object1",
+			Type: "object",
+		}, {
+			Name: "array2",
+			Type: "array",
+		}, {
+			Name: "string2",
+			Type: "string",
+		}, {
+			Name: "object2",
+			Type: "object",
+		}},
+		want: []v1.ParamSpecs{
+			{{
+				Name: "string1",
+				Type: "string",
+			}, {
+				Name: "string2",
+				Type: "string",
+			}},
+			{{
+				Name: "array1",
+				Type: "array",
+			}, {
+				Name: "array2",
+				Type: "array",
+			}},
+			{{
+				Name: "object1",
+				Type: "object",
+			}, {
+				Name: "object2",
+				Type: "object",
+			}},
+		},
+	}}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			s, a, o := tc.params.SortByType()
+			got := []v1.ParamSpecs{s, a, o}
+			if d := cmp.Diff(tc.want, got); d != "" {
+				t.Error(diff.PrintWantGot(d))
+			}
+		})
+	}
+}
+
+func TestValidateNoDuplicateNames(t *testing.T) {
+	tcs := []struct {
+		name          string
+		params        v1.ParamSpecs
+		expectedError *apis.FieldError
+	}{{
+		name: "no duplicates",
+		params: v1.ParamSpecs{{
+			Name: "foo",
+		}, {
+			Name: "bar",
+		}},
+	}, {
+		name: "duplicates",
+		params: v1.ParamSpecs{{
+			Name: "foo",
+		}, {
+			Name: "foo",
+		}},
+		expectedError: &apis.FieldError{
+			Message: `parameter appears more than once`,
+			Paths:   []string{"params[foo]"},
+		},
+	}}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.params.ValidateNoDuplicateNames()
+			if d := cmp.Diff(tc.expectedError.Error(), got.Error()); d != "" {
+				t.Error(diff.PrintWantGot(d))
 			}
 		})
 	}

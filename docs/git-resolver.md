@@ -13,13 +13,17 @@ This Resolver responds to type `git`.
 
 ## Parameters
 
-| Param Name   | Description                                                                                                            | Example Value                                               |
-|--------------|------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------|
-| `url`        | URL of the repo to fetch and clone anonymously. Either `url`, or `repo` (with `org`) must be specified, but not both.  | `https://github.com/tektoncd/catalog.git`                   |
-| `repo`       | The repository to find the resource in. Either `url`, or `repo` (with `org`) must be specified, but not both.          | `pipeline`, `test-infra`                                    |
-| `org`        | The organization to find the repository in. Default can be set in [configuration](#configuration).                     | `tektoncd`, `kubernetes`                                    |
-| `revision`   | Git revision to checkout a file from. This can be commit SHA, branch or tag.                                           | `aeb957601cf41c012be462827053a21a420befca` `main` `v0.38.2` |
-| `pathInRepo` | Where to find the file in the repo.                                                                                    | `task/golang-build/0.3/golang-build.yaml`                  |
+| Param Name   | Description                                                                                                                                                                | Example Value                                               |
+|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------|
+| `url`        | URL of the repo to fetch and clone anonymously. Either `url`, or `repo` (with `org`) must be specified, but not both.                                                      | `https://github.com/tektoncd/catalog.git`                   |
+| `repo`       | The repository to find the resource in. Either `url`, or `repo` (with `org`) must be specified, but not both.                                                              | `pipeline`, `test-infra`                                    |
+| `org`        | The organization to find the repository in. Default can be set in [configuration](#configuration).                                                                         | `tektoncd`, `kubernetes`                                    |
+| `token`      | An optional secret name in the `PipelineRun` namespace to fetch the token from. Defaults to empty, meaning it will try to use the configuration from the global configmap. | `secret-name`, (empty)                                      |
+| `tokenKey`   | An optional key in the token secret name in the `PipelineRun` namespace to fetch the token from. Defaults to `token`.                                                      | `token`                                                     |
+| `revision`   | Git revision to checkout a file from. This can be commit SHA, branch or tag.                                                                                               | `aeb957601cf41c012be462827053a21a420befca` `main` `v0.38.2` |
+| `pathInRepo` | Where to find the file in the repo.                                                                                                                                        | `task/golang-build/0.3/golang-build.yaml`                   |
+| `serverURL`  | An optional server URL (that includes the https:// prefix) to connect for API operations                                                                                   | `https:/github.mycompany.com`                               |
+| `scmType`    | An optional SCM type to use for API operations                                                                                                                             | `github`, `gitlab`, `gitea`                                 |
 
 ## Requirements
 
@@ -131,6 +135,38 @@ spec:
       value: task/git-clone/0.6/git-clone.yaml
 ```
 
+#### Task Resolution with a custom token to a custom SCM provider
+
+```yaml
+apiVersion: tekton.dev/v1beta1
+kind: TaskRun
+metadata:
+  name: git-api-demo-tr
+spec:
+  taskRef:
+    resolver: git
+    params:
+    - name: org
+      value: tektoncd
+    - name: repo
+      value: catalog
+    - name: revision
+      value: main
+    - name: pathInRepo
+      value: task/git-clone/0.6/git-clone.yaml
+    # my-secret-token should be created in the namespace where the
+    # pipelinerun is created and contain a GitHub personal access
+    # token in the token key of the secret.
+    - name: token
+      value: my-secret-token
+    - name: tokenKey
+      value: token
+    - name: scmType
+      value: github
+    - name: serverURL
+      value: https://ghe.mycompany.com
+```
+
 #### Pipeline resolution
 
 ```yaml
@@ -155,11 +191,123 @@ spec:
     value: Ranni
 ```
 
+### Specifying Configuration for Multiple Git Providers
+
+It is possible to specify configurations for multiple providers and even multiple configurations for same provider to use in 
+different tekton resources. Firstly, details need to be added in configmap with the unique identifier key prefix.
+To use them in tekton resources, pass the unique key mentioned in configmap as an extra param to resolver with key 
+`configKey` and value will be the unique key. If no `configKey` param is passed, `default` will be used. Default 
+configuration to be used for git resolver can be specified in configmap by either mentioning no unique identifier or 
+using identifier `default`
+
+**Note**: `configKey` should not contain `.` while specifying configurations in configmap
+
+### Example Configmap
+
+Multiple configurations can be specified in `git-resolver-config` configmap like this. All keys mentioned above are supported.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: git-resolver-config
+  namespace: tekton-pipelines-resolvers
+  labels:
+    app.kubernetes.io/component: resolvers
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: tekton-pipelines
+data:
+  # configuration 1, default one to use if no configKey provided or provided with value default
+  fetch-timeout: "1m"
+  default-url: "https://github.com/tektoncd/catalog.git"
+  default-revision: "main"
+  scm-type: "github"
+  server-url: ""
+  api-token-secret-name: ""
+  api-token-secret-key: ""
+  api-token-secret-namespace: "default"
+  default-org: ""
+
+  # configuration 2, will be used if configKey param passed with value test1
+  test1.fetch-timeout: "5m"
+  test1.default-url: ""
+  test1.default-revision: "stable"
+  test1.scm-type: "github"
+  test1.server-url: "api.internal-github.com"
+  test1.api-token-secret-name: "test1-secret"
+  test1.api-token-secret-key: "token"
+  test1.api-token-secret-namespace: "test1"
+  test1.default-org: "tektoncd"
+
+  # configuration 3, will be used if configKey param passed with value test2
+  test2.fetch-timeout: "10m"
+  test2.default-url: ""
+  test2.default-revision: "stable"
+  test2.scm-type: "gitlab"
+  test2.server-url: "api.internal-gitlab.com"
+  test2.api-token-secret-name: "test2-secret"
+  test2.api-token-secret-key: "pat"
+  test2.api-token-secret-namespace: "test2"
+  test2.default-org: "tektoncd-infra"
+```
+
+#### Task Resolution
+
+A specific configurations from the configMap can be selected by passing the parameter `configKey` with the value 
+matching one of the configuration keys used in the configMap.
+
+```yaml
+apiVersion: tekton.dev/v1beta1
+kind: TaskRun
+metadata:
+  name: git-api-demo-tr
+spec:
+  taskRef:
+    resolver: git
+    params:
+    - name: org
+      value: tektoncd
+    - name: repo
+      value: catalog
+    - name: revision
+      value: main
+    - name: pathInRepo
+      value: task/git-clone/0.6/git-clone.yaml
+    - name: configKey
+      value: test1
+```
+
+#### Pipeline resolution
+
+```yaml
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: git-api-demo-pr
+spec:
+  pipelineRef:
+    resolver: git
+    params:
+    - name: org
+      value: tektoncd
+    - name: repo
+      value: catalog
+    - name: revision
+      value: main
+    - name: pathInRepo
+      value: pipeline/simple/0.1/simple.yaml
+    - name: configKey
+      value: test2
+  params:
+  - name: name
+    value: Ranni
+```
+
 ## `ResolutionRequest` Status
 `ResolutionRequest.Status.RefSource` field captures the source where the remote resource came from. It includes the 3 subfields: `url`, `digest` and `entrypoint`.
 - `url`
-  - If users choose to use anonymous cloning, the url is just user-provided value for the `url` param in the [SPDX download format](https://spdx.github.io/spdx-spec/package-information/#77-package-download-location-field). 
-  - If scm api is used, it would be the clone URL of the repo fetched from scm repository service in the [SPDX download format](https://spdx.github.io/spdx-spec/package-information/#77-package-download-location-field). 
+  - If users choose to use anonymous cloning, the url is just user-provided value for the `url` param in the [SPDX download format](https://spdx.github.io/spdx-spec/package-information/#77-package-download-location-field).
+  - If scm api is used, it would be the clone URL of the repo fetched from scm repository service in the [SPDX download format](https://spdx.github.io/spdx-spec/package-information/#77-package-download-location-field).
 - `digest`
   - The algorithm name is fixed "sha1", but subject to be changed to "sha256" once Git eventually uses SHA256 at some point later. See https://git-scm.com/docs/hash-function-transition for more details.
   - The value is the actual commit sha at the moment of resolving the resource even if a user provides a tag/branch name for the param `revision`.
@@ -189,7 +337,9 @@ spec:
 apiVersion: resolution.tekton.dev/v1alpha1
 kind: ResolutionRequest
 metadata:
-  ... 
+  labels:
+    resolution.tekton.dev/type: git
+  ...
 spec:
   params:
     pathInRepo: pipeline.yaml

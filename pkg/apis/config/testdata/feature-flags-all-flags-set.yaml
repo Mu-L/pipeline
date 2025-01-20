@@ -34,3 +34,8 @@ data:
   keep-pod-on-cancel: "true"
   enable-cel-in-whenexpression: "true"
   enable-step-actions: "true"
+  enable-param-enum: "true"
+  enable-artifacts: "true"
+  disable-inline-spec: "pipeline,pipelinerun,taskrun"
+  enable-concise-resolver-syntax: "true"
+  enable-kubernetes-sidecar: "true"

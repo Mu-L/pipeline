@@ -1,21 +1,19 @@
 aliases:
   pipeline-approvers:
   - afrittoli
-  - bobcatfish
   - dibyom
   - ImJasonH
   - vdemeester
   - pritidesai
   - jerop
-  - lbernick
   - abayer
   - wlynch
   - yongxuanzhang
   - chitrangpatel
+  - jeromeJu
 
   pipeline-reviewers:
   - afrittoli
-  - bobcatfish
   - dibyom
   - vdemeester
   - pritidesai
@@ -25,19 +23,16 @@ aliases:
 
   apis-approvers:
   - afrittoli
-  - bobcatfish
   - dibyom
   - ImJasonH
   - vdemeester
   - pritidesai
   - jerop
-  - lbernick
   - abayer
   - wlynch
 
   productivity-approvers:
   - afrittoli
-  - bobcatfish
   - vdemeester
 
 # Alumni ❤️
@@ -47,3 +42,5 @@ aliases:
 # aaron-prindle
 # sbwsg
 # dlorenc
+# lbernick
+# bobcatfish

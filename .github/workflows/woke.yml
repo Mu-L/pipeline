@@ -1,4 +1,8 @@
 name: 'woke'
+
+permissions:
+  contents: read
+
 on:
   - pull_request
 jobs:
@@ -6,17 +10,25 @@ jobs:
     name: 'woke'
     runs-on: ubuntu-latest
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@0080882f6c36860b6ba35c610c98ce87d4e2f26f # v2.10.2
+        with:
+          egress-policy: audit
       - name: 'Checkout'
-        uses: actions/checkout@v2
-
-      - uses: jitterbit/get-changed-files@v1
-        id: files
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@d6e91a2266cdb9d62096cebf1e8546899c6aa18f # v45.0.6
+        with:
+          write_output_files: true
+          files: |
+            **
 
       - name: 'woke'
-        uses: get-woke/woke-action@v0
+        if: steps.changed-files.outputs.any_changed == 'true'
+        uses: get-woke/woke-action@b2ec032c4a2c912142b38a6a453ad62017813ed0 # v0
         with:
           # Cause the check to fail on any broke rules
           fail-on-error: true
-          # See https://github.com/marketplace/actions/get-all-changed-files
-          # for more options
-          woke-args: ${{ steps.files.outputs.added_modified }}
+          woke-args: ${{ steps.changed_files.outputs.all_changed_files }}

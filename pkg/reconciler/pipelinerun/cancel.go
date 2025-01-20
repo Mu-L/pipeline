@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	pipelineErrors "github.com/tektoncd/pipeline/pkg/apis/pipeline/errors"
 	v1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	clientset "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
@@ -88,6 +89,10 @@ func cancelTaskRun(ctx context.Context, taskRunName string, namespace string, cl
 		// still be able to cancel the PipelineRun
 		return nil
 	}
+	if pipelineErrors.IsImmutableTaskRunSpecError(err) {
+		// The TaskRun may have completed and the spec field is immutable, we should ignore this error.
+		return nil
+	}
 	return err
 }
 
@@ -139,7 +144,7 @@ func cancelPipelineTaskRunsForTaskNames(ctx context.Context, logger *zap.Sugared
 		logger.Infof("cancelling TaskRun %s", taskRunName)
 
 		if err := cancelTaskRun(ctx, taskRunName, pr.Namespace, clientSet); err != nil {
-			errs = append(errs, fmt.Errorf("Failed to patch TaskRun `%s` with cancellation: %w", taskRunName, err).Error())
+			errs = append(errs, fmt.Errorf("failed to patch TaskRun `%s` with cancellation: %w", taskRunName, err).Error())
 			continue
 		}
 	}
@@ -148,7 +153,7 @@ func cancelPipelineTaskRunsForTaskNames(ctx context.Context, logger *zap.Sugared
 		logger.Infof("cancelling CustomRun %s", runName)
 
 		if err := cancelCustomRun(ctx, runName, pr.Namespace, clientSet); err != nil {
-			errs = append(errs, fmt.Errorf("Failed to patch CustomRun `%s` with cancellation: %w", runName, err).Error())
+			errs = append(errs, fmt.Errorf("failed to patch CustomRun `%s` with cancellation: %w", runName, err).Error())
 			continue
 		}
 	}
